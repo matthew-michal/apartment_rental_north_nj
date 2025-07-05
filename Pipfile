@@ -1,0 +1,30 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+evidently = "==0.6.7"
+prefect = "*"
+tqdm = "*"
+joblib = "*"
+pyarrow = "*"
+psycopg = "*"
+psycopg-binary = "*"
+pandas = "*"
+numpy = "*"
+scikit-learn = "*"
+jupyter = "*"
+matplotlib = "*"
+requests = "*"
+
+[dev-packages]
+pytest = "*"
+deepdiff = "*"
+pylint = "==2.14.4"
+black = "*"
+isort = "*"
+pre-commit = "*"
+
+[requires]
+python_version = "3.12"
