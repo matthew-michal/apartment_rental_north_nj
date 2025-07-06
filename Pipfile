@@ -19,6 +19,10 @@ matplotlib = "*"
 requests = "*"
 xgboost = "*"
 seaborn = "*"
+boto3 = "*"
+mlflow = "*"
+awscli = "*"
+hyperopt = "*"
 
 [dev-packages]
 pytest = "*"
