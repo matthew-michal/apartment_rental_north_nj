@@ -18,6 +18,7 @@ jupyter = "*"
 matplotlib = "*"
 requests = "*"
 xgboost = "*"
+seaborn = "*"
 
 [dev-packages]
 pytest = "*"
