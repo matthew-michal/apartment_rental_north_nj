@@ -17,6 +17,7 @@ scikit-learn = "*"
 jupyter = "*"
 matplotlib = "*"
 requests = "*"
+xgboost = "*"
 
 [dev-packages]
 pytest = "*"

@@ -1,4 +1,7 @@
 from math import radians, cos
+from datetime import datetime, date, timedelta
+import pandas as pd
+from initial_data_pull_test import data_pull
 
 nj_transit_locations = {
     'brick_church': [40.76581846318419, -74.21915255150205],
@@ -48,4 +51,21 @@ def find_station(lat_long):
             
     return 'not close'
     
-    
+def clean_dates(df):
+    df.listedDate = pd.to_datetime(df.listedDate).dt.date
+    df = df.loc[df.listedDate.max() - timedelta(days=14)]
+    return df
+
+def feature_creation(training=False):
+    df = data_pull()
+    df['lat_long'] = df.latitude.astype(str) + '_' + df.longitude.astype(str)
+    df['station'] = df['lat_long'].apply(find_station)
+
+    if not training:
+        df = clean_dates(df)
+
+    return df
+
+if __name__ == "__main__":
+    df = feature_creation(training=False)
+    print(df.station.value_counts())
