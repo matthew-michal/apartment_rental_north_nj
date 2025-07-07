@@ -1,5 +1,6 @@
 import xgboost as xgb
 import pandas as pd
+from pathlib import Path
 import pickle
 from math import radians, cos
 from datetime import datetime, date, timedelta
@@ -13,6 +14,7 @@ from sklearn.metrics import root_mean_squared_error
 import matplotlib.pyplot as plt
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 from hyperopt.pyll import scope
+from prefect import flow, task
 
 os.environ["AWS_PROFILE"] = "default"
 
@@ -70,62 +72,150 @@ def find_station(lat_long):
 
 mlflow.set_experiment("north-nj-apartments-experiment-v2")
 
-
-df = pd.read_csv('seventh_load.csv')
-df2 = pd.read_csv('training_load.csv')
-df = pd.concat([df,df2]).drop_duplicates()
-
-df.zipCode = df.zipCode.astype(str)
-df['lat_long'] = df.latitude.astype(str) + '_' + df.longitude.astype(str)
-df['station'] = df.lat_long.apply(find_station)
-
-feats = [
-    # 'city',
-    'latitude', 'longitude',
-    'station',
-    'propertyType','bedrooms', 'bathrooms', 'yearBuilt', 'lotSize'
-]
+models_folder = Path('models')
+models_folder.mkdir(exist_ok=True)
 
 
-X_train, X_test, y_train, y_test = train_test_split(
-    df[feats], df.price, test_size=0.2, random_state=42
-)
+@task(retries=4, retry_delay_seconds=2, log_prints=True)
+def read_dataframe():
+    df = pd.read_csv('seventh_load.csv')
+    df2 = pd.read_csv('training_load.csv')
+    df = pd.concat([df,df2]).drop_duplicates()
+    print(df.shape)
 
-le_pt = LabelEncoder()
-le_station = LabelEncoder()
-
-
-X_train['propertyType'] = le_pt.fit_transform(X_train['propertyType'])
-X_train['station'] = le_station.fit_transform(X_train['station'])
-
-X_test['propertyType'] = le_pt.transform(X_test['propertyType'])
-X_test['station'] = le_station.transform(X_test['station'])
-
-train = xgb.DMatrix(X_train, label=y_train)
-valid = xgb.DMatrix(X_test, label=y_test)
+    return df
 
 
-def objective(params):
-    with mlflow.start_run():
+@task(retries=2, retry_delay_seconds=2)
+def create_X(df, le_pt=None, le_station=None):
+    # df.zipCode = df.zipCode.astype(str)
+    df['lat_long'] = df.latitude.astype(str) + '_' + df.longitude.astype(str)
+    df['station'] = df.lat_long.apply(find_station)
 
-        mlflow.set_tag("developer", "mmichal")
-        mlflow.set_tag("model", "xgboost")
+    feats = [
+        # 'city',
+        'latitude', 'longitude',
+        'station',
+        'propertyType','bedrooms', 'bathrooms', 'yearBuilt', 'lotSize'
+    ]
 
-        mlflow.log_params(params)
+
+    X = df[feats]
+
+    if le_pt is None:
+        le_pt = LabelEncoder()
+        X['propertyType'] = le_pt.fit_transform(X['propertyType'])
+    else:
+        X['propertyType'] = le_pt.transform(X['propertyType'])
+
+    if le_station is None:
+        le_station = LabelEncoder()
+        X['station'] = le_station.fit_transform(X['station'])
+    else:
+        X['station'] = le_station.transform(X['station'])
+
+    return X, le_pt, le_station
+
+
+@task(retries=2, retry_delay_seconds=2, log_prints=True)
+def train_model(X_train, y_train, X_test, y_test, le_pt, le_station):
+
+
+
+    train = xgb.DMatrix(X_train, label=y_train)
+    valid = xgb.DMatrix(X_test, label=y_test)
+
+    best_params = {
+        'learning_rate': 0.05972322932431019,
+        'max_depth': 6,
+        'min_child_weight': 10.65084675866938,
+        'objective': 'reg:linear',
+        'reg_alpha': 0.3134223536955863,
+        'reg_lambda': 0.08592250762440364,
+        'seed': 42
+    }
+
+    with mlflow.start_run() as run:
+
+        mlflow.log_params(best_params)
 
         booster = xgb.train(
-            params=params,
+            params=best_params,
             dtrain=train,
             num_boost_round=1000,
-            evals=[(valid, "validation")],
-            early_stopping_rounds = 50
+            evals=[(valid, 'validation')],
+            early_stopping_rounds=50
         )
 
         y_pred = booster.predict(valid)
         rmse = root_mean_squared_error(y_test, y_pred)
         mlflow.log_metric("rmse", rmse)
 
-    return {'loss': rmse, 'status': STATUS_OK}
+        with open("models/preprocessor.b", "wb") as f_out:
+            pickle.dump((le_pt, le_station), f_out)
+        mlflow.log_artifact("models/preprocessor.b", artifact_path="preprocessor")
+
+        mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
+
+        return run.info.run_id
+
+@flow
+def run():
+    df = read_dataframe()
+    
+    feats = [
+        # 'city',
+        'latitude', 'longitude',
+        # 'station',
+        'propertyType','bedrooms', 'bathrooms', 'yearBuilt', 'lotSize'
+    ]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+    df[feats], df.price, test_size=0.2, random_state=42
+)
+
+    X_train, le_pt, le_station = create_X(X_train)
+    X_test, _, _ = create_X(X_test, le_pt, le_station)
+
+    run_id = train_model(X_train, y_train, X_test, y_test, le_pt, le_station)
+    print(f"MLflow run_id: {run_id}")
+    return run_id
+
+if __name__ == "__main__":
+    # import argparse
+
+    # parser = argparse.ArgumentParser(description='Train a model to predict taxi trip duration.')
+    # parser.add_argument('--year', type=int, required=True, help='Year of the data to train on')
+    # parser.add_argument('--month', type=int, required=True, help='Month of the data to train on')
+    # args = parser.parse_args()
+
+    # run_id = run(year=args.year, month=args.month)
+    run_id = run()
+
+    with open("run_id.txt", "w") as f:
+        f.write(run_id)
+
+# def objective(params):
+#     with mlflow.start_run():
+
+#         mlflow.set_tag("developer", "mmichal")
+#         mlflow.set_tag("model", "xgboost")
+
+#         mlflow.log_params(params)
+
+#         booster = xgb.train(
+#             params=params,
+#             dtrain=train,
+#             num_boost_round=1000,
+#             evals=[(valid, "validation")],
+#             early_stopping_rounds = 50
+#         )
+
+#         y_pred = booster.predict(valid)
+#         rmse = root_mean_squared_error(y_test, y_pred)
+#         mlflow.log_metric("rmse", rmse)
+
+#     return {'loss': rmse, 'status': STATUS_OK}
 
 
 # search_space = {
@@ -147,38 +237,10 @@ def objective(params):
 # )
 
 
-best_params = {
-    'learning_rate': 0.05972322932431019,
-    'max_depth': 6,
-    'min_child_weight': 10.65084675866938,
-    'objective': 'reg:linear',
-    'reg_alpha': 0.3134223536955863,
-    'reg_lambda': 0.08592250762440364,
-    'seed': 42
-}
 
 
-with mlflow.start_run() as run:
 
-    mlflow.log_params(best_params)
 
-    booster = xgb.train(
-        params=best_params,
-        dtrain=train,
-        num_boost_round=1000,
-        evals=[(valid, 'validation')],
-        early_stopping_rounds=50
-    )
-
-    y_pred = booster.predict(valid)
-    rmse = root_mean_squared_error(y_test, y_pred)
-    mlflow.log_metric("rmse", rmse)
-
-    with open("models/preprocessor.b", "wb") as f_out:
-        pickle.dump((le_pt, le_station), f_out)
-    mlflow.log_artifact("models/preprocessor.b", artifact_path="preprocessor")
-
-    mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
 
 
 

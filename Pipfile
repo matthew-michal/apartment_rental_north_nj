@@ -4,14 +4,14 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-evidently = "==0.6.7"
+pandas = "*"
+mlflow = "==1.30.1"
 prefect = "*"
 tqdm = "*"
 joblib = "*"
 pyarrow = "*"
 psycopg = "*"
 psycopg-binary = "*"
-pandas = "*"
 numpy = "*"
 scikit-learn = "*"
 jupyter = "*"
@@ -22,7 +22,7 @@ seaborn = "*"
 boto3 = "*"
 awscli = "*"
 hyperopt = "*"
-mlflow = "==1.30.1"
+evidently = "*"
 
 [dev-packages]
 pytest = "*"
