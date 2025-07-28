@@ -1,0 +1,12 @@
+prefect
+prefect-aws
+boto3
+pandas
+xgboost
+evidently
+scikit-learn
+requests
+geopy
+awscli
+hyperopt
+mlflow==1.30.1

@@ -4,10 +4,10 @@ import pandas as pd
 import pickle
 import os
 
-url = "https://api.rentcast.io/v1/listings/rental/long-term?state=NJ&status=Active&limit=500&offset=500"
-url = "https://api.rentcast.io/v1/listings/rental/long-term?latitude=40.79756715723661&longitude=-74.47460155149217&radius=1&status=Active&limit=500"
-url = "https://api.rentcast.io/v1/listings/rental/long-term?latitude=40.79572107840714&longitude=-74.363299819611&radius=7&status=Active&limit=500"
-url = "https://api.rentcast.io/v1/listings/rental/long-term?latitude=40.8314005740992&longitude=-74.40197132373629&radius=11&status=Active&limit=500"
+# url = "https://api.rentcast.io/v1/listings/rental/long-term?state=NJ&status=Active&limit=500&offset=500"
+# url = "https://api.rentcast.io/v1/listings/rental/long-term?latitude=40.79756715723661&longitude=-74.47460155149217&radius=1&status=Active&limit=500"
+# url = "https://api.rentcast.io/v1/listings/rental/long-term?latitude=40.79572107840714&longitude=-74.363299819611&radius=7&status=Active&limit=500"
+# url = "https://api.rentcast.io/v1/listings/rental/long-term?latitude=40.8314005740992&longitude=-74.40197132373629&radius=11&status=Active&limit=500"
 url = "https://api.rentcast.io/v1/listings/rental/long-term?latitude=40.8314005740992&longitude=-74.40197132373629&radius=12&limit=500"
 
 API_KEY = os.getenv('API_KEY')

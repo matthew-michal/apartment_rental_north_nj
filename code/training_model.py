@@ -10,7 +10,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 import mlflow
 import os
-from sklearn.metrics import root_mean_squared_error
+from sklearn.metrics import root_mean_squared_error, mean_squared_error
 import matplotlib.pyplot as plt
 from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
 from hyperopt.pyll import scope
@@ -70,7 +70,7 @@ def find_station(lat_long):
     return 'not close'
 
 
-mlflow.set_experiment("north-nj-apartments-experiment-v2")
+mlflow.set_experiment("north-nj-apartments-experiment-v3")
 
 models_folder = Path('models')
 models_folder.mkdir(exist_ok=True)
@@ -116,24 +116,89 @@ def create_X(df, le_pt=None, le_station=None):
 
     return X, le_pt, le_station
 
+@task(retries=2, retry_delay_seconds=2, log_prints=True)
+def tune_models(X_train, y_train, X_test, y_test, le_pt, le_station):
+
+    # Define search space
+    space = {
+        'learning_rate': hp.uniform('learning_rate', 0.01, 0.3),
+        'max_depth': hp.choice('max_depth', range(3, 10)),
+        'min_child_weight': hp.uniform('min_child_weight', 1, 10),
+        'reg_alpha': hp.uniform('reg_alpha', 0, 1),
+        'reg_lambda': hp.uniform('reg_lambda', 0, 1)
+    }
+    
+    def objective(params):
+        with mlflow.start_run():
+            # Log parameters
+            mlflow.log_params(params)
+            
+            # Train model
+            model = xgb.XGBRegressor(
+                objective='reg:linear',
+                n_estimators=100,
+                random_state=42,
+                **params
+            )
+            
+            model.fit(X_train, y_train)
+            
+            # Make predictions
+            y_pred = model.predict(X_test)
+            
+            # Calculate RMSE
+            rmse = root_mean_squared_error(y_test, y_pred)
+            
+            # Log metrics
+            mlflow.log_metric("rmse", rmse)
+            mlflow.log_metric("mse", mean_squared_error(y_test, y_pred))
+            
+            # Log model
+            mlflow.xgboost.log_model(model, "model")
+            
+            return {'loss': rmse, 'status': STATUS_OK}
+    
+    # Run hyperparameter optimization
+    trials = Trials()
+    best = fmin(
+        fn=objective,
+        space=space,
+        algo=tpe.suggest,
+        max_evals=50,  # Adjust based on your time constraints
+        trials=trials
+    )
+    
+    # Get the best run
+    best_run = min(trials.results, key=lambda x: x['loss'])
+    best_rmse = best_run['loss']
+    
+    print(f"Best hyperparameters: {best}")
+    print(f"Best RMSE: {best_rmse}")
+    
+    return best, best_rmse
+
+
 
 @task(retries=2, retry_delay_seconds=2, log_prints=True)
-def train_model(X_train, y_train, X_test, y_test, le_pt, le_station):
+def train_model(X_train, y_train, X_test, y_test, le_pt, le_station, best):
 
 
 
     train = xgb.DMatrix(X_train, label=y_train)
     valid = xgb.DMatrix(X_test, label=y_test)
 
-    best_params = {
-        'learning_rate': 0.05972322932431019,
-        'max_depth': 6,
-        'min_child_weight': 10.65084675866938,
-        'objective': 'reg:linear',
-        'reg_alpha': 0.3134223536955863,
-        'reg_lambda': 0.08592250762440364,
-        'seed': 42
-    }
+    # best_params = {
+    #     'learning_rate': 0.05972322932431019,
+    #     'max_depth': 6,
+    #     'min_child_weight': 10.65084675866938,
+    #     'objective': 'reg:linear',
+    #     'reg_alpha': 0.3134223536955863,
+    #     'reg_lambda': 0.08592250762440364,
+    #     'seed': 42
+    # }
+    best_params = best
+    best_params['objective'] = 'reg:linear'
+    best_params['seed'] = 42
 
     with mlflow.start_run() as run:
 
@@ -157,7 +222,9 @@ def train_model(X_train, y_train, X_test, y_test, le_pt, le_station):
 
         mlflow.xgboost.log_model(booster, artifact_path="models_mlflow")
 
-        return run.info.run_id
+        run_id = run.info.run_id
+
+    return run_id
 
 @flow
 def run():
@@ -177,7 +244,9 @@ def run():
     X_train, le_pt, le_station = create_X(X_train)
     X_test, _, _ = create_X(X_test, le_pt, le_station)
 
-    run_id = train_model(X_train, y_train, X_test, y_test, le_pt, le_station)
+    best, _ = tune_models(X_train, y_train, X_test, y_test, le_pt, le_station)
+
+    run_id = train_model(X_train, y_train, X_test, y_test, le_pt, le_station, best)
     print(f"MLflow run_id: {run_id}")
     return run_id
 
